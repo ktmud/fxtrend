@@ -6,17 +6,12 @@
 // The IMF DataMapper API does not send CORS headers, so the data is bundled at
 // build time instead of fetched from the browser. Re-run with:
 //   npm run data:inflation
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 
-// currency -> IMF economy code
-const ECONOMIES = {
-  AUD: 'AUS', BRL: 'BRA', CAD: 'CAN', CHF: 'CHE', CNY: 'CHN', CZK: 'CZE',
-  DKK: 'DNK', EUR: 'EURO', GBP: 'GBR', HKD: 'HKG', HUF: 'HUN', IDR: 'IDN',
-  ILS: 'ISR', INR: 'IND', ISK: 'ISL', JPY: 'JPN', KRW: 'KOR', MXN: 'MEX',
-  MYR: 'MYS', NOK: 'NOR', NZD: 'NZL', PHP: 'PHL', PLN: 'POL', RON: 'ROU',
-  SEK: 'SWE', SGD: 'SGP', THB: 'THA', TRY: 'TUR', USD: 'USA', ZAR: 'ZAF',
-}
+// currency -> IMF economy, from src/data/currencies.json (written by fetch-fx.mjs)
+const currencies = JSON.parse(await readFile(new URL('../src/data/currencies.json', import.meta.url), 'utf8'))
+const ECONOMIES = Object.fromEntries(currencies.filter((c) => c.imf).map((c) => [c.code, c.imf]))
 const FIRST_YEAR = 1997
 const LAST_YEAR = new Date().getUTCFullYear() + 1 // include next year's projection so "today" is covered
 
@@ -26,17 +21,24 @@ const body = execFileSync('curl', ['-sSf', '--max-time', '120', url], { maxBuffe
 const all = JSON.parse(body.toString('utf8')).values.PCPIPCH
 
 const series = {}
+const missing = []
+const thisYear = new Date().getUTCFullYear()
 for (const [ccy, code] of Object.entries(ECONOMIES)) {
   const raw = all[code]
-  if (!raw) throw new Error(`IMF has no data for ${code} (${ccy})`)
   const years = {}
   for (let y = FIRST_YEAR; y <= LAST_YEAR; y++) {
-    const v = raw[String(y)]
+    const v = raw?.[String(y)]
     if (typeof v === 'number') years[y] = v
+  }
+  // Needs recent coverage: extrapolating stale CPI across years would invent inflation.
+  const last = Math.max(...Object.keys(years).map(Number))
+  if (Object.keys(years).length < 3 || last < thisYear - 1) {
+    missing.push(`${ccy}→${code}${raw ? ` (data ends ${last})` : ''}`)
+    continue
   }
   series[ccy] = years
 }
-
+if (missing.length) console.warn('No usable IMF inflation for:', missing.join(', '))
 const out = {
   source: 'IMF World Economic Outlook (PCPIPCH, annual average CPI inflation, %)',
   url: 'https://www.imf.org/external/datamapper/PCPIPCH',

@@ -136,7 +136,7 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
       .map((s, k) => {
         let i = s.values.length - 1
         while (i >= 0 && s.values[i] == null) i--
-        return i < 0 ? null : { id: s.id, label: s.label, color: s.color, value: s.values[i]!, y: ys[k][i]!, dim: s.dim }
+        return i < 0 ? null : { id: s.id, label: s.id, color: s.color, value: s.values[i]!, y: ys[k][i]!, dim: s.dim }
       })
       .filter((v): v is NonNullable<typeof v> => v !== null)
       .sort((a, b) => a.y - b.y)

@@ -5,6 +5,8 @@ export interface LeaderRow {
   code: string
   color: string
   value: number | null
+  /** Not comparable with the others (e.g. nominal when the rest are real): ranked last. */
+  nominal?: boolean
 }
 
 interface Props {
@@ -22,7 +24,7 @@ export function Leaderboard({ rows, domain, caption }: Props) {
   const hi = Math.max(0, domain[1])
   const span = hi - lo || 1
   const zero = ((0 - lo) / span) * 100
-  const ranked = [...rows].sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity))
+  const ranked = [...rows].sort((a, b) => Number(!!a.nominal) - Number(!!b.nominal) || (b.value ?? -Infinity) - (a.value ?? -Infinity))
   const rank = new Map(ranked.map((r, i) => [r.code, i]))
   return (
     <figure className="leaderboard">
@@ -33,9 +35,10 @@ export function Leaderboard({ rows, domain, caption }: Props) {
           const left = v == null ? zero : Math.min(zero, ((v - lo) / span) * 100)
           const width = v == null ? 0 : (Math.abs(v) / span) * 100
           return (
-            <li key={r.code} style={{ transform: `translateY(${(rank.get(r.code) ?? 0) * ROW}px)` }}>
+            <li key={r.code} className={r.nominal ? 'is-nominal' : undefined} style={{ transform: `translateY(${(rank.get(r.code) ?? 0) * ROW}px)` }}>
               <span className="lb-id">
                 <span aria-hidden="true">{CURRENCY[r.code]?.flag}</span> {r.code}
+                {r.nominal && <span className="tag">nominal</span>}
               </span>
               <span className="lb-track">
                 <span className="lb-zero" style={{ left: `${zero}%` }} />

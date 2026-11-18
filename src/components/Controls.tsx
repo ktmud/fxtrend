@@ -1,14 +1,14 @@
 import { useId } from 'react'
 
-export function Switch({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+export function Switch({ checked, onChange, label, hint, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }) {
   const id = useId()
   return (
-    <label className="switch" htmlFor={id}>
+    <label className={`switch${disabled ? ' is-disabled' : ''}`} htmlFor={id}>
       <span className="switch-text">
         <span className="switch-label">{label}</span>
         {hint && <span className="switch-hint">{hint}</span>}
       </span>
-      <input id={id} type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input id={id} type="checkbox" role="switch" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch-track" aria-hidden="true">
         <span className="switch-thumb" />
       </span>

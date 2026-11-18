@@ -54,6 +54,8 @@ export function buildPriceIndex(annual: Record<string, number>): PriceIndex {
   }
 }
 
+export const hasInflation = (code: string): boolean => code in INFLATION.series
+
 const cache = new Map<string, PriceIndex>()
 export function priceIndex(code: string): PriceIndex | null {
   const annual = INFLATION.series[code]
