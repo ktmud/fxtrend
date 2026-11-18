@@ -256,22 +256,27 @@ export default function App() {
       </header>
 
       <section className="controls" aria-label="Chart settings">
-        <button type="button" className="base-btn" onClick={() => setSheet('base')}>
+        <button type="button" className="base-btn" onClick={() => setSheet('base')} aria-label={`Base currency: ${base}. Change`}>
           <span className="flag" aria-hidden="true">
             {baseMeta?.flag}
           </span>
           <span className="base-text">
             <span className="base-caption">Base</span>
             <span className="base-code">
-              {base} <span className="chev" aria-hidden="true">▾</span>
+              {base}
             </span>
+          </span>
+          <span className="chev" aria-hidden="true">
+            <svg viewBox="0 0 12 12" width="12" height="12">
+              <path d="M2.5 4.5 L6 8 L9.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </span>
         </button>
         <Switch
           checked={adjusted}
           onChange={(v) => setState((s) => ({ ...s, adjusted: v }))}
           label="Adjust for inflation"
-          hint={adjusted ? 'Each currency by its own CPI' : 'Showing nominal rates'}
+          hint={adjusted ? 'Per-country CPI' : 'Nominal rates'}
         />
         <Segmented label="Time range" value={range} options={RANGES} onChange={(r) => setState((s) => ({ ...s, range: r }))} />
       </section>
