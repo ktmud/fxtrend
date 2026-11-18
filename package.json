@@ -9,7 +9,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "data:inflation": "node scripts/fetch-inflation.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "data:fx": "node scripts/fetch-fx.mjs",
+    "data": "npm run data:fx && npm run data:inflation"
   },
   "dependencies": {
     "react": "^19.3.1",

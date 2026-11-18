@@ -24,7 +24,7 @@ export default function App() {
 
   const start = useMemo(() => rangeStart(range), [range])
   const codes = useMemo(() => picks.map((p) => p.code), [picks])
-  const { table, loading, error, retry } = useRates(base, codes, start)
+  const { table, status, loading, error, retry } = useRates(base, codes, start)
 
   const focus = picks.length === 1 ? picks[0].code : state.focus
   const slotOf = useCallback((code: string) => picks.find((p) => p.code === code)?.slot ?? 0, [picks])
@@ -295,8 +295,15 @@ export default function App() {
           stronger or weaker if it moved more than inflation explains.
         </p>
         <p className="muted small">
-          Exchange rates: European Central Bank reference rates via{' '}
-          <a href="https://frankfurter.dev" target="_blank" rel="noreferrer">Frankfurter</a>. Inflation:{' '}
+          Exchange rates: European Central Bank daily reference rates via{' '}
+          <a href="https://frankfurter.dev" target="_blank" rel="noreferrer">Frankfurter</a>
+          {status && (
+            <>
+              {' '}(through {formatDate(Date.parse(status.asOf + 'T00:00:00Z'))}
+              {status.live ? ', live' : ', saved snapshot — live feed unavailable'})
+            </>
+          )}
+          . Inflation:{' '}
           <a href={INFLATION.url} target="_blank" rel="noreferrer">IMF World Economic Outlook</a> annual average CPI (euro-area
           aggregate for EUR), interpolated monthly; figures from {INFLATION.projectedFrom} on are IMF estimates. Data
           snapshot {INFLATION.fetchedAt}. Not financial advice.

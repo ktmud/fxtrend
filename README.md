@@ -26,19 +26,35 @@ When a currency weakens by exactly its extra inflation (purchasing-power parity)
 
 ## Data
 
-| What | Source | How |
-|---|---|---|
-| Exchange rates | ECB reference rates via [Frankfurter](https://frankfurter.dev), daily since 1999 | Fetched live in the browser (no key, CORS-enabled) |
-| Inflation | [IMF World Economic Outlook](https://www.imf.org/external/datamapper/PCPIPCH), annual average CPI change; euro-area aggregate for EUR | Bundled in `src/data/inflation.json` because the IMF API blocks browser requests |
+| What | Source | Stored in repo | Live |
+|---|---|---|---|
+| Exchange rates | ECB daily reference rates via [Frankfurter](https://frankfurter.dev), since 1999 | `public/data/fx-eur.json` (every currency per 1 EUR) | Days newer than the snapshot are fetched in the browser |
+| Inflation | [IMF World Economic Outlook](https://www.imf.org/external/datamapper/PCPIPCH), annual average CPI change; euro-area aggregate for EUR | `src/data/inflation.json` | – (the IMF API blocks browser requests) |
 
-Annual averages are placed mid-year and interpolated geometrically, giving a smooth daily price index.
+The app always loads the committed snapshot first, so it works even when the live API is down. The footer says whether
+the newest days came from the live feed or the snapshot. Rates for any base currency are cross rates of the
+EUR-based data (`quote/EUR ÷ base/EUR`).
+
+Annual inflation averages are placed mid-year and interpolated geometrically, giving a smooth daily price index.
 WEO numbers for the current and next year are IMF estimates or projections.
 
-To refresh the inflation snapshot (needs `curl`):
+Refresh the snapshots (inflation needs `curl`):
 
 ```sh
+npm run data          # both
+npm run data:fx       # exchange rates only
 npm run data:inflation
 ```
+
+## Deploying to GitHub Pages
+
+`.github/workflows/deploy.yml` builds and publishes the site on every push to `main`, on weekday evenings
+(to pick up new ECB rates), and on demand from the Actions tab. Each run refreshes both datasets before building,
+and keeps the committed copies if a source is down.
+
+One-time setup: in the repository go to **Settings → Pages → Build and deployment** and set **Source** to
+**GitHub Actions**. The site will be at `https://<owner>.github.io/<repo>/`. The build uses relative asset paths,
+so it also works from any other static host.
 
 ## Development
 
