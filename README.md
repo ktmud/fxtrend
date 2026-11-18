@@ -6,12 +6,16 @@ Pick a base currency, add up to eight currencies to compare, and flip **Adjust f
 every historical rate in today's purchasing power. Each currency is adjusted by its own home economy's
 consumer price inflation.
 
-- **Compare view**: % change of 1 unit of the base currency against every selected currency, on one shared axis.
-- **Detail view** (tap a card): the actual rate, with the inflation-adjusted line, the nominal line (dashed),
-  and a breakdown of cumulative inflation in both economies.
+- **Time travel**: drag across the chart (or use the arrow keys) to pick a date in the past.
+  - **Detail view** (tap a card): a two-part ticket answers *"$100 then bought what ¥X buys today; today it gets ¥Y"*.
+    The headline says how much further your money goes now. The space between the nominal and inflation-adjusted lines
+    is shaded as the *inflation gap*.
+  - **Compare view**: % change against every selected currency on one axis, and a leaderboard that re-ranks
+    the currencies as you scrub through time.
+- **Banknote look**: each currency pair gets its own generated guilloche rosette (the engraved line pattern on
+  banknotes), plus serif display figures (Fraunces, self-hosted) and currency-symbol watermarks.
 - Mobile-first layout with bottom-sheet pickers; two-column layout on desktop. Light and dark themes.
-- Crosshair tooltip (mouse, touch, or arrow keys on the focused chart) and a data-table view.
-- The URL holds the current view, so a link shares exactly what you see.
+- The URL holds the current view, so a link shares exactly what you see. A data-table view is included for accessibility.
 
 ## How the adjustment works
 

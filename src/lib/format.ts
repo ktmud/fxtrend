@@ -41,3 +41,17 @@ const monthOnly = new Intl.DateTimeFormat(undefined, { month: 'short', timeZone:
 export const formatDate = (t: number) => dateFmt.format(t)
 export const formatMonth = (t: number) => monthFmt.format(t)
 export const formatMonthShort = (t: number) => monthOnly.format(t)
+
+/** "$100", "¥15,930", "€92.10" – whole units once amounts get large. */
+export function formatMoney(v: number | null | undefined, currency: string): string {
+  if (v == null || !Number.isFinite(v)) return '—'
+  const digits = Math.abs(v) >= 1000 ? 0 : 2
+  return nf({ style: 'currency', currency, currencyDisplay: 'narrowSymbol', minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v)
+}
+
+/** The currency's own symbol ("¥", "€"), or null when it only has a code (e.g. CHF). */
+export function currencySymbol(currency: string): string | null {
+  const parts = nf({ style: 'currency', currency, currencyDisplay: 'narrowSymbol' }).formatToParts(1)
+  const sym = parts.find((p) => p.type === 'currency')?.value ?? ''
+  return sym && sym !== currency && sym.length <= 2 ? sym : null
+}

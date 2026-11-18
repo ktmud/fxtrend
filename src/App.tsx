@@ -2,9 +2,11 @@ import { useCallback, useMemo, useState } from 'react'
 import { Chart, type ChartSeries } from './components/Chart'
 import { Segmented, Switch } from './components/Controls'
 import { CurrencySheet } from './components/CurrencySheet'
+import { Guilloche, GuillocheBand } from './components/Guilloche'
+import { Leaderboard } from './components/Leaderboard'
 import { Sparkline } from './components/Sparkline'
 import { CURRENCY } from './lib/currencies'
-import { formatDate, formatMonth, formatPct, formatRate, formatTick } from './lib/format'
+import { currencySymbol, formatDate, formatMoney, formatMonth, formatPct, formatRate, formatTick } from './lib/format'
 import { annualisedInflation, cumulativeInflation, INFLATION } from './lib/inflation'
 import { MAX_SERIES, seriesVar } from './lib/palette'
 import { change, derivePairs, firstLast, indexed, sampleIndices, type PairSeries } from './lib/series'
@@ -20,6 +22,8 @@ export default function App() {
   const [theme, toggleTheme] = useTheme()
   const [sheet, setSheet] = useState<'base' | 'add' | null>(null)
   const [hot, setHot] = useState<string | null>(null)
+  /** Sampled index under the chart crosshair: drives the time-travel views. */
+  const [scrub, setScrub] = useState<number | null>(null)
   const { base, picks, range, adjusted } = state
 
   const start = useMemo(() => rangeStart(range), [range])
@@ -38,7 +42,7 @@ export default function App() {
     const pick = (arr: (number | null)[]) => idx.map((i) => arr[i])
     const t0 = table.times[0]
     const t1 = table.times[table.times.length - 1]
-    return { pairs, times, pick, t0, t1, base: table.base }
+    return { pairs, idx, times, pick, t0, t1, base: table.base }
   }, [table, codes])
 
   const measure = (p: PairSeries) => (adjusted ? p.real : p.nominal)
@@ -67,14 +71,27 @@ export default function App() {
 
   // ---------- chart model ----------
   const baseMeta = CURRENCY[base]
-  let chart: { series: ChartSeries[]; zero: boolean; ends: boolean; fmt: (v: number) => string; tick: (v: number, s: number) => string; aria: string } | null = null
+  let chart: {
+    series: ChartSeries[]
+    zero: boolean
+    ends: boolean
+    fmt: (v: number) => string
+    tick: (v: number, s: number) => string
+    aria: string
+    gap?: { a: string; b: string; label: string }
+    tooltip: boolean
+  } | null = null
   let hero: React.ReactNode = null
+  let below: React.ReactNode = null
 
   if (view) {
     const rangeLabel = formatMonth(view.t0)
+    const scrubbing = scrub != null && scrub < view.times.length
     const focusPair = focus ? view.pairs.find((p) => p.code === focus) : undefined
     if (focusPair) {
-      const color = seriesVar(slotOf(focusPair.code))
+      const q = focusPair.code
+      const qMeta = CURRENCY[q]
+      const color = seriesVar(slotOf(q))
       const series: ChartSeries[] = adjusted
         ? [
             { id: 'real', label: 'Inflation-adjusted', color, values: view.pick(focusPair.real), area: true },
@@ -87,22 +104,63 @@ export default function App() {
         ends: false,
         fmt: formatRate,
         tick: formatTick,
-        aria: `${view.base} to ${focusPair.code} exchange rate since ${rangeLabel}${adjusted ? ', inflation-adjusted' : ''}. Use arrow keys to read values.`,
+        aria: `${view.base} to ${q} exchange rate since ${rangeLabel}${adjusted ? ', inflation-adjusted' : ''}. Use arrow keys to travel through time.`,
+        gap: adjusted ? { a: 'real', b: 'nominal', label: 'Inflation gap' } : undefined,
+        tooltip: true,
       }
-      const { last } = firstLast(focusPair.nominal)
-      const chg = change(measure(focusPair))
+
+      // Time-travel ticket: "then" is the scrubbed date, or the start of the range.
+      const values = measure(focusPair)
+      const { last, firstIndex } = firstLast(focusPair.nominal)
+      let thenI = scrubbing ? view.idx[scrub!] : firstIndex
+      while (thenI < values.length - 1 && values[thenI] == null) thenI++
+      const thenV = values[thenI]
+      const thenLabel = formatMonth(table!.times[thenI])
+      const chg = thenV != null && last != null ? last / thenV - 1 : null
+      const amount = 100
+      const further = chg != null && chg >= 0
       hero = (
-        <div className="hero">
+        <div className="hero ticket">
+          <Guilloche seed={view.base + q} color={color} className="rosette" />
           <p className="eyebrow">
-            {CURRENCY[focusPair.code]?.flag} {CURRENCY[focusPair.code]?.name}
+            {qMeta?.flag} {qMeta?.name}
           </p>
           <p className="hero-value">
-            <span className="hero-unit">1 {view.base} =</span> {formatRate(last)} <span className="hero-unit">{focusPair.code}</span>
+            <span className="hero-unit">1 {view.base} =</span> {formatRate(last)} <span className="hero-unit">{q}</span>
           </p>
-          <p className="hero-sub">
-            <Delta value={chg} /> since {rangeLabel}
-            <span className="muted"> · {adjusted ? 'in today’s purchasing power' : 'nominal'}</span>
+          <div className="stubs" aria-live="polite">
+            <div className={`stub${scrubbing ? ' is-live' : ''}`}>
+              <span className="stub-label">{thenLabel}</span>
+              <span className="stub-amount">{formatMoney(thenV == null ? null : thenV * amount, q)}</span>
+              <span className="stub-note">
+                for {formatMoney(amount, view.base)}
+                {adjusted ? ' · in today’s money' : ''}
+              </span>
+            </div>
+            <div className="stub-arrow" aria-hidden="true">
+              <svg viewBox="0 0 40 12" width="40" height="12">
+                <path d="M0 6 H36 M31 1 L37 6 L31 11" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            </div>
+            <div className="stub">
+              <span className="stub-label">Today</span>
+              <span className="stub-amount">{formatMoney(last == null ? null : last * amount, q)}</span>
+              <span className="stub-note">for {formatMoney(amount, view.base)}</span>
+            </div>
+          </div>
+          <p className="verdict">
+            {chg == null ? null : adjusted ? (
+              <>
+                Your money goes <Delta value={Math.abs(chg)} plain /> {further ? 'further' : 'less far'} in {qMeta?.region} than in {thenLabel}.
+              </>
+            ) : (
+              <>
+                1 {view.base} buys <Delta value={Math.abs(chg)} plain /> {further ? 'more' : 'less'} {q} than in {thenLabel}
+                <span className="muted"> (before inflation)</span>.
+              </>
+            )}
           </p>
+          {!scrubbing && <p className="scrub-hint">↔ Drag across the chart to travel back in time</p>}
         </div>
       )
     } else {
@@ -119,28 +177,54 @@ export default function App() {
         ends: series.length <= 4,
         fmt: (v) => formatPct(v, 1),
         tick: (v, s) => formatPct(v, s >= 0.01 ? 0 : 1),
-        aria: `Percent change of ${view.base} against ${codes.join(', ')} since ${rangeLabel}${adjusted ? ', inflation-adjusted' : ''}. Use arrow keys to read values.`,
+        aria: `Percent change of ${view.base} against ${codes.join(', ')} since ${rangeLabel}${adjusted ? ', inflation-adjusted' : ''}. Use arrow keys to travel through time; the ranking below follows.`,
+        tooltip: false,
       }
-      const ranked = view.pairs
-        .map((p) => ({ code: p.code, chg: change(measure(p)) }))
-        .filter((r): r is { code: string; chg: number } => r.chg != null)
-        .sort((a, b) => b.chg - a.chg)
-      const best = ranked[0]
-      const worst = ranked[ranked.length - 1]
+      const at = scrubbing ? scrub! : view.times.length - 1
+      let lo = 0
+      let hi = 0
+      for (const sr of series)
+        for (const v of sr.values)
+          if (v != null) {
+            lo = Math.min(lo, v)
+            hi = Math.max(hi, v)
+          }
+      const rows = series.map((sr) => {
+        // latest known value at or before the scrubbed date
+        let i = at
+        while (i > 0 && sr.values[i] == null) i--
+        return { code: sr.id, color: sr.color, value: sr.values[i] ?? null }
+      })
+      // The headline tells today's story; the leaderboard below follows the scrub.
+      const latest = series.map((sr) => ({ code: sr.id, value: firstLast(sr.values).last }))
+      const best = [...latest].sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity))[0]
       hero = (
-        <div className="hero">
+        <div className="hero ticket">
+          <Guilloche seed={view.base} color="var(--series-1)" className="rosette" />
           <p className="eyebrow">
-            {baseMeta?.flag} What 1 {view.base} buys
+            {baseMeta?.flag} Where does 1 {view.base} go furthest?
           </p>
           <h2 className="hero-title">
-            {adjusted ? 'Real' : 'Nominal'} change since {rangeLabel}
+            {best?.value != null && best.value < 0 ? (
+              <>
+                {adjusted ? 'Buying power' : 'Value'} fell everywhere since {rangeLabel}; least in {CURRENCY[best.code]?.region} (<Delta value={best.value} />)
+              </>
+            ) : best?.value != null ? (
+              <>
+                In {CURRENCY[best.code]?.region}, <Delta value={best.value} plain /> {adjusted ? 'more buying power' : 'more currency'} than in {rangeLabel}
+              </>
+            ) : (
+              <>{adjusted ? 'Real' : 'Nominal'} change since {rangeLabel}</>
+            )}
           </h2>
-          {best && worst && best !== worst && (
-            <p className="hero-sub">
-              Strongest against <b>{best.code}</b> <Delta value={best.chg} />, weakest against <b>{worst.code}</b> <Delta value={worst.chg} />
-            </p>
-          )}
         </div>
+      )
+      below = (
+        <Leaderboard
+          rows={rows}
+          domain={[lo, hi]}
+          caption={`${adjusted ? 'Real' : 'Nominal'} change since ${rangeLabel}, as of ${formatDate(view.times[at])}`}
+        />
       )
     }
   }
@@ -149,6 +233,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <GuillocheBand color="var(--series-1)" className="page-band" />
       <header className="topbar">
         <div className="brand">
           <span className="logo" aria-hidden="true">
@@ -231,6 +316,12 @@ export default function App() {
                       {s.label}
                     </li>
                   ))}
+                  {chart.gap && (
+                    <li>
+                      <span className="key-hatch" aria-hidden="true" />
+                      {chart.gap.label}
+                    </li>
+                  )}
                 </ul>
               )}
               <Chart
@@ -242,7 +333,11 @@ export default function App() {
                 endLabels={chart.ends}
                 ariaLabel={chart.aria}
                 busy={loading}
+                gap={chart.gap}
+                tooltip={chart.tooltip}
+                onHoverIndex={setScrub}
               />
+              {below}
               {error && (
                 <p className="inline-error">
                   {error} <button type="button" className="btn-text" onClick={retry}>Retry</button>
@@ -332,8 +427,9 @@ export default function App() {
   )
 }
 
-function Delta({ value }: { value: number | null }) {
+function Delta({ value, plain }: { value: number | null; plain?: boolean }) {
   if (value == null) return <span className="delta">—</span>
+  if (plain) return <span className="delta">{formatPct(value, value >= 1 ? 0 : 1, false)}</span>
   const dir = value > 0.0005 ? 'up' : value < -0.0005 ? 'down' : 'flat'
   return (
     <span className={`delta ${dir}`}>
@@ -364,6 +460,7 @@ function CurrencyCard({
   onHover: (on: boolean) => void
 }) {
   const meta = CURRENCY[pick.code]
+  const symbol = currencySymbol(pick.code)
   const color = seriesVar(pick.slot)
   const values = useMemo(() => (pair ? (adjusted ? pair.real : pair.nominal) : []), [pair, adjusted])
   const spark = useMemo(() => {
@@ -383,6 +480,11 @@ function CurrencyCard({
     >
       <button type="button" className="ccy-main" onClick={onFocus} aria-pressed={active} aria-label={`${meta?.name ?? pick.code}: show detail`}>
         <span className="ccy-stripe" aria-hidden="true" />
+        {symbol && (
+          <span className="ccy-watermark" aria-hidden="true">
+            {symbol}
+          </span>
+        )}
         <span className="flag big" aria-hidden="true">
           {meta?.flag}
         </span>

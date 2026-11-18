@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { formatDate, formatMonthShort } from '../lib/format'
 import { niceTicks, timeTicks } from '../lib/series'
 
@@ -24,6 +24,12 @@ interface Props {
   endLabels?: boolean
   ariaLabel: string
   busy?: boolean
+  /** Shade the area between two series (e.g. the inflation gap between nominal and real). */
+  gap?: { a: string; b: string; label: string }
+  /** Reports the index under the crosshair (null when idle), for linked views. */
+  onHoverIndex?: (i: number | null) => void
+  /** false = only a date pill on the crosshair (a linked view shows the values). */
+  tooltip?: boolean
 }
 
 const HEIGHT_MOBILE = 260
@@ -81,12 +87,13 @@ function areaPath(xs: number[], ys: (number | null)[], floor: number): string {
   return d
 }
 
-export function Chart({ times, series, formatValue, formatTick, zeroLine, endLabels, ariaLabel, busy }: Props) {
+export function Chart({ times, series, formatValue, formatTick, zeroLine, endLabels, ariaLabel, busy, gap, onHoverIndex, tooltip = true }: Props) {
   const [wrapRef, width] = useWidth<HTMLDivElement>()
   const gradId = useId().replace(/:/g, '')
   const [rawHover, setHover] = useState<number | null>(null)
   // A stale hover index (data shrank) simply reads as "no hover".
   const hover = rawHover != null && rawHover < times.length ? rawHover : null
+  useEffect(() => onHoverIndex?.(hover), [hover, onHoverIndex])
   const pointerType = useRef<string>('mouse')
 
   const narrow = width < 560
@@ -120,7 +127,7 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
     return { yt, labels, padLeft, padRight, plotW, plotH, x, y, xs, xt }
   }, [series, times, width, height, narrow, zeroLine, endLabels, formatTick])
 
-  const ys = series.map((s) => s.values.map((v) => (v == null ? null : geo.y(v))))
+  const ys = useMemo(() => series.map((s) => s.values.map((v) => (v == null ? null : geo.y(v)))), [series, geo])
 
   // Direct end labels, nudged apart so they never collide.
   const ends = useMemo(() => {
@@ -156,6 +163,8 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
 
   const onPointer = (e: React.PointerEvent<SVGSVGElement>) => {
     pointerType.current = e.pointerType
+    // A finger on the chart is scrubbing, not keyboard focus: skip the focus ring.
+    if (e.type === 'pointerdown' && e.pointerType !== 'mouse') e.preventDefault()
     const r = e.currentTarget.getBoundingClientRect()
     setHover(indexAt(e.clientX - r.left))
   }
@@ -174,6 +183,28 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
   }
 
   const floor = height - PAD_BOTTOM
+
+  const gapPath = useMemo(() => {
+    if (!gap) return ''
+    const a = series.findIndex((s) => s.id === gap.a)
+    const b = series.findIndex((s) => s.id === gap.b)
+    if (a < 0 || b < 0) return ''
+    let d = ''
+    let seg: number[] = []
+    const flush = () => {
+      if (seg.length > 1) {
+        d += seg.map((i, k) => `${k ? 'L' : 'M'}${geo.xs[i].toFixed(1)},${ys[a][i]!.toFixed(1)}`).join('')
+        d += [...seg].reverse().map((i) => `L${geo.xs[i].toFixed(1)},${ys[b][i]!.toFixed(1)}`).join('') + 'Z'
+      }
+      seg = []
+    }
+    for (let i = 0; i < geo.xs.length; i++) {
+      if (ys[a][i] == null || ys[b][i] == null) flush()
+      else seg.push(i)
+    }
+    flush()
+    return d
+  }, [gap, series, geo, ys])
   const hx = hover != null ? geo.xs[hover] : null
   const rows =
     hover != null
@@ -201,6 +232,9 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
           onBlur={() => setHover(null)}
         >
           <defs>
+            <pattern id={`${gradId}-hatch`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="6" className="hatch-line" />
+            </pattern>
             {series.map(
               (s) =>
                 s.area && (
@@ -233,6 +267,7 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
 
           {/* data */}
           <g className="marks">
+            {gapPath && <path d={gapPath} fill={`url(#${gradId}-hatch)`} className="gap-ribbon" />}
             {series.map(
               (s, k) =>
                 s.area && <path key={`a-${s.id}`} d={areaPath(geo.xs, ys[k], floor)} fill={`url(#${gradId}-${s.id})`} className="area" />,
@@ -271,7 +306,12 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
         </svg>
       )}
 
-      {hover != null && hx != null && rows.length > 0 && (
+      {!tooltip && hover != null && hx != null && (
+        <div className="date-pill" style={{ left: Math.min(Math.max(hx, 50), width - 50) }}>
+          {formatDate(times[hover])}
+        </div>
+      )}
+      {tooltip && hover != null && hx != null && rows.length > 0 && (
         <div
           className="tooltip"
           role="status"
