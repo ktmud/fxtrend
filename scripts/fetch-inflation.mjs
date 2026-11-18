@@ -47,5 +47,13 @@ const out = {
   projectedFrom: new Date().getUTCFullYear(),
   series,
 }
-await writeFile(new URL('../src/data/inflation.json', import.meta.url), JSON.stringify(out, null, 0) + '\n')
-console.log(`Wrote inflation for ${Object.keys(series).length} currencies, ${FIRST_YEAR}-${LAST_YEAR}`)
+const target = new URL('../src/data/inflation.json', import.meta.url)
+// Leave the file alone when the numbers haven't changed, so a refresh with no new IMF
+// data produces no diff (just a new fetchedAt would otherwise make every run a change).
+const prev = await readFile(target, 'utf8').then(JSON.parse).catch(() => null)
+if (prev && prev.projectedFrom === out.projectedFrom && JSON.stringify(prev.series) === JSON.stringify(out.series)) {
+  console.log(`Inflation unchanged since ${prev.fetchedAt} (${Object.keys(series).length} currencies)`)
+} else {
+  await writeFile(target, JSON.stringify(out, null, 0) + '\n')
+  console.log(`Wrote inflation for ${Object.keys(series).length} currencies, ${FIRST_YEAR}-${LAST_YEAR}`)
+}

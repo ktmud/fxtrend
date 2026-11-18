@@ -63,6 +63,12 @@ npm run data:inflation
 (to pick up new ECB rates), and on demand from the Actions tab. Each run refreshes both datasets before building,
 and keeps the committed copies if a source is down.
 
+`.github/workflows/refresh-inflation.yml` checks the IMF for new inflation figures each quarter (early February,
+May, August and November, after each World Economic Outlook release or update). It can also be started from the
+Actions tab. When the numbers changed, it runs the tests and opens or updates a pull request from
+`data/inflation-refresh`. For it to open PRs, enable **Settings → Actions → General → Workflow permissions →
+Allow GitHub Actions to create and approve pull requests**.
+
 One-time setup: in the repository go to **Settings → Pages → Build and deployment** and set **Source** to
 **GitHub Actions**. The site will be at `https://<owner>.github.io/<repo>/`. The build uses relative asset paths,
 so it also works from any other static host.
