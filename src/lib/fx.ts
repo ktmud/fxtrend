@@ -1,15 +1,19 @@
 /**
  * Exchange-rate data.
  *
- * 1. A committed snapshot of ECB daily reference rates (public/data/fx-eur.json, all
- *    currencies per 1 EUR since 1999) is the primary source: same-origin, cacheable,
- *    and works even if the live API is unreachable.
+ * 1. Committed snapshot: one file per currency (public/data/fx/<CODE>.json, units per 1 USD,
+ *    daily since 1999), so the app only downloads the currencies on screen. Same-origin and
+ *    cacheable; works even if the live API is unreachable.
  * 2. Days newer than the snapshot are topped up from frankfurter.dev (free, CORS-enabled).
  *    If that fails the app simply shows the snapshot.
- * 3. Any base is derived as a cross rate: quote/EUR ÷ base/EUR.
+ * 3. Any pair is a cross rate: quote/USD ÷ base/USD. Sources publish on different calendars
+ *    (some skip weekends, some don't), so each leg carries its last value forward for a few days.
  */
-const API = 'https://api.frankfurter.dev/v1'
-const SNAPSHOT_URL = `${import.meta.env.BASE_URL}data/fx-eur.json`
+const API = 'https://api.frankfurter.dev/v2'
+const DATA = `${import.meta.env.BASE_URL}data/fx/`
+const DAY = 86_400_000
+/** Longest a quote is carried forward across missing days before the line breaks. */
+const MAX_STALE_DAYS = 7
 
 export interface RateTable {
   base: string
@@ -17,7 +21,7 @@ export interface RateTable {
   dates: string[]
   /** epoch ms for each date */
   times: number[]
-  /** units of quote currency per 1 base, aligned with `dates`; null when not quoted that day */
+  /** units of quote currency per 1 base, aligned with `dates`; null when unavailable */
   rates: Record<string, (number | null)[]>
 }
 
@@ -28,20 +32,24 @@ export interface DataStatus {
   live: boolean
 }
 
-interface EurHistory {
-  dates: string[]
-  /** per 1 EUR; EUR itself is implicitly 1 */
-  rates: Record<string, (number | null)[]>
+interface Series {
+  times: number[]
+  values: number[]
   live: boolean
 }
 
-interface Snapshot {
-  end: string
-  dates: string[]
-  rates: Record<string, (number | null)[]>
+interface SnapshotFile {
+  start: string
+  d: number[]
+  v: number[]
 }
 
-const dayAfter = (iso: string) => new Date(Date.parse(iso + 'T00:00:00Z') + 86_400_000).toISOString().slice(0, 10)
+interface IndexFile {
+  end: string
+}
+
+const toTime = (iso: string) => Date.parse(iso + 'T00:00:00Z')
+const toIso = (t: number) => new Date(t).toISOString().slice(0, 10)
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
@@ -49,80 +57,102 @@ async function getJson<T>(url: string): Promise<T> {
   return (await res.json()) as T
 }
 
-/** Live EUR-based rates from `start` onward, every currency in one request. */
-async function fetchLive(start: string): Promise<{ dates: string[]; rates: Record<string, Record<string, number>> }> {
-  const json = await getJson<{ rates: Record<string, Record<string, number>> }>(`${API}/${start}..?base=EUR`)
-  // The API answers an empty range with the latest earlier day, so filter.
-  const dates = Object.keys(json.rates).filter((d) => d >= start).sort()
-  return { dates, rates: json.rates }
+type LiveRow = { date: string; quote: string; rate: number }
+
+async function fetchLive(code: string, from: string): Promise<{ times: number[]; values: number[] }> {
+  const rows = await getJson<LiveRow[]>(`${API}/rates?base=USD&quotes=${encodeURIComponent(code)}&from=${from}`)
+  const pts = rows.filter((r) => r.quote === code && r.date >= from && r.rate > 0).sort((a, b) => (a.date < b.date ? -1 : 1))
+  return { times: pts.map((p) => toTime(p.date)), values: pts.map((p) => p.rate) }
 }
 
-async function loadHistory(): Promise<EurHistory> {
-  let snap: Snapshot | null = null
+let index: Promise<IndexFile | null> | null = null
+const getIndex = () => (index ??= getJson<IndexFile>(`${DATA}index.json`).catch(() => null))
+
+async function loadSeries(code: string): Promise<Series> {
+  const idx = await getIndex()
+  let snap: SnapshotFile | null = null
   try {
-    snap = await getJson<Snapshot>(SNAPSHOT_URL)
+    snap = await getJson<SnapshotFile>(`${DATA}${code}.json`)
   } catch {
     snap = null
   }
-
   if (!snap) {
-    // No snapshot (e.g. a dev checkout without data): fall back to the live API alone.
-    const live = await fetchLive('1999-01-04')
-    const codes = new Set(live.dates.flatMap((d) => Object.keys(live.rates[d])))
-    const rates: Record<string, (number | null)[]> = {}
-    for (const c of codes) rates[c] = live.dates.map((d) => live.rates[d][c] ?? null)
-    return { dates: live.dates, rates, live: true }
+    // Not in the snapshot: take the whole history from the live API.
+    const live = await fetchLive(code, '1999-01-01')
+    if (live.times.length === 0) throw new Error(`No exchange-rate data for ${code}`)
+    return { ...live, live: true }
   }
-
-  const dates = [...snap.dates]
-  const rates: Record<string, (number | null)[]> = Object.fromEntries(Object.entries(snap.rates).map(([c, v]) => [c, [...v]]))
-  let live = false
+  const times: number[] = []
+  let t = toTime(snap.start)
+  for (const d of snap.d) times.push((t += d * DAY))
+  const values = [...snap.v]
+  const snapEnd = idx?.end && idx.end > toIso(times[times.length - 1]) ? toTime(idx.end) : times[times.length - 1]
   try {
-    const tail = await fetchLive(dayAfter(snap.end))
-    for (const d of tail.dates) {
-      dates.push(d)
-      for (const c of Object.keys(rates)) rates[c].push(tail.rates[d][c] ?? null)
-    }
-    live = true
+    const tail = await fetchLive(code, toIso(snapEnd + DAY))
+    tail.times.forEach((tt, i) => {
+      if (tt > times[times.length - 1]) {
+        times.push(tt)
+        values.push(tail.values[i])
+      }
+    })
+    return { times, values, live: true }
   } catch {
-    /* offline or API down: the snapshot is still a complete history */
+    return { times, values, live: false } // offline or API down
   }
-  return { dates, rates, live }
 }
 
-let history: Promise<EurHistory> | null = null
-function getHistory(): Promise<EurHistory> {
-  if (!history) {
-    history = loadHistory()
-    history.catch(() => (history = null))
+const cache = new Map<string, Promise<Series>>()
+function getSeries(code: string): Promise<Series> {
+  let p = cache.get(code)
+  if (!p) {
+    p = loadSeries(code)
+    cache.set(code, p)
+    p.catch(() => cache.delete(code))
   }
-  return history
+  return p
 }
 
 /** Retry after a failure starts from scratch. */
 export function resetRates() {
-  history = null
+  cache.clear()
+  index = null
 }
 
-const eurRate = (h: EurHistory, code: string, i: number): number | null => (code === 'EUR' ? 1 : (h.rates[code]?.[i] ?? null))
+/** Value of `s` at each of `times`, carrying the last quote forward up to MAX_STALE_DAYS. */
+function align(s: Series, times: number[]): (number | null)[] {
+  const out: (number | null)[] = new Array(times.length)
+  let j = -1
+  for (let i = 0; i < times.length; i++) {
+    while (j + 1 < s.times.length && s.times[j + 1] <= times[i]) j++
+    out[i] = j >= 0 && times[i] - s.times[j] <= MAX_STALE_DAYS * DAY ? s.values[j] : null
+  }
+  return out
+}
 
 export async function loadRates(base: string, codes: string[], start: string): Promise<{ table: RateTable; status: DataStatus }> {
-  const h = await getHistory()
-  let from = h.dates.findIndex((d) => d >= start)
-  if (from < 0) from = h.dates.length
-  const dates = h.dates.slice(from)
+  const quotes = [...new Set(codes)].filter((c) => c !== base)
+  const needed = [...new Set([base, ...quotes])].filter((c) => c !== 'USD')
+  const loaded = await Promise.all(needed.map((c) => getSeries(c).then((s) => [c, s] as const)))
+  const series = new Map(loaded)
+
+  const t0 = toTime(start)
+  const all = new Set<number>()
+  for (const s of series.values()) for (const t of s.times) if (t >= t0) all.add(t)
+  const times = [...all].sort((a, b) => a - b)
+
+  const usd = (code: string): (number | null)[] => (code === 'USD' ? times.map(() => 1) : align(series.get(code)!, times))
+  const b = usd(base)
   const rates: Record<string, (number | null)[]> = {}
-  for (const code of codes) {
-    if (code === base) continue
-    rates[code] = dates.map((_, k) => {
-      const i = from + k
-      const b = eurRate(h, base, i)
-      const q = eurRate(h, code, i)
-      return b == null || q == null || b === 0 ? null : q / b
+  for (const q of quotes) {
+    const qv = usd(q)
+    rates[q] = times.map((_, i) => {
+      const x = qv[i]
+      const y = b[i]
+      return x == null || y == null || y === 0 ? null : x / y
     })
   }
-  return {
-    table: { base, dates, times: dates.map((d) => Date.parse(d + 'T00:00:00Z')), rates },
-    status: { asOf: h.dates[h.dates.length - 1] ?? start, live: h.live },
-  }
+
+  const asOf = times.length ? toIso(times[times.length - 1]) : start
+  const live = loaded.length === 0 || loaded.every(([, s]) => s.live)
+  return { table: { base, dates: times.map(toIso), times, rates }, status: { asOf, live } }
 }

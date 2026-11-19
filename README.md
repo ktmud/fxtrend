@@ -2,7 +2,7 @@
 
 Inflation-adjusted foreign currency conversion rates over time.
 
-Pick a base currency, add up to eight currencies to compare, and flip **Adjust for inflation** to restate
+Pick a base currency from 160+ world currencies, add up to eight to compare, and flip **Adjust for inflation** to restate
 every historical rate in today's purchasing power. Each currency is adjusted by its own home economy's
 consumer price inflation.
 
@@ -32,12 +32,18 @@ When a currency weakens by exactly its extra inflation (purchasing-power parity)
 
 | What | Source | Stored in repo | Live |
 |---|---|---|---|
-| Exchange rates | ECB daily reference rates via [Frankfurter](https://frankfurter.dev), since 1999 | `public/data/fx-eur.json` (every currency per 1 EUR) | Days newer than the snapshot are fetched in the browser |
-| Inflation | [IMF World Economic Outlook](https://www.imf.org/external/datamapper/PCPIPCH), annual average CPI change; euro-area aggregate for EUR | `src/data/inflation.json` | – (the IMF API blocks browser requests) |
+| Exchange rates | [Frankfurter v2](https://frankfurter.dev): central-bank reference rates for 160+ currencies, daily since 1999 where available | `public/data/fx/<CODE>.json` (units per 1 USD, one file per currency) | Days newer than the snapshot are fetched in the browser |
+| Inflation | [IMF World Economic Outlook](https://www.imf.org/external/datamapper/PCPIPCH), annual average CPI change | `src/data/inflation.json` | – (the IMF API blocks browser requests) |
+| Currency names, regions, flags | Frankfurter + ISO 3166 | `src/data/currencies.json` | – |
 
-The app always loads the committed snapshot first, so it works even when the live API is down. The footer says whether
-the newest days came from the live feed or the snapshot. Rates for any base currency are cross rates of the
-EUR-based data (`quote/EUR ÷ base/EUR`).
+The app loads only the files for the currencies on screen, so it works even when the live API is down. The footer
+says whether the newest days came from the live feed or the snapshot. Any pair is a cross rate through USD
+(`quote/USD ÷ base/USD`). Sources publish on different calendars, so each leg carries its last quote forward for up
+to a week.
+
+Inflation comes from each currency's home economy. Currency unions use the euro-area aggregate (EUR) or their
+largest member (Cameroon for XAF, Côte d'Ivoire for XOF, Saint Lucia for XCD). Sterling-pegged territories use UK CPI.
+Currencies with no usable CPI (e.g. SDR, KPW) are tagged "no CPI" and shown as nominal rates.
 
 Annual inflation averages are placed mid-year and interpolated geometrically, giving a smooth daily price index.
 WEO numbers for the current and next year are IMF estimates or projections.
@@ -45,8 +51,9 @@ WEO numbers for the current and next year are IMF estimates or projections.
 Refresh the snapshots (inflation needs `curl`):
 
 ```sh
-npm run data          # both
-npm run data:fx       # exchange rates only
+npm run data            # both (exchange rates incrementally)
+npm run data:fx         # append days newer than each currency's file
+npm run data:fx:full    # rebuild every currency's full history (~15 min; add --resume after an interruption)
 npm run data:inflation
 ```
 
@@ -55,6 +62,12 @@ npm run data:inflation
 `.github/workflows/deploy.yml` builds and publishes the site on every push to `main`, on weekday evenings
 (to pick up new ECB rates), and on demand from the Actions tab. Each run refreshes both datasets before building,
 and keeps the committed copies if a source is down.
+
+`.github/workflows/refresh-inflation.yml` checks the IMF for new inflation figures each quarter (early February,
+May, August and November, after each World Economic Outlook release or update). It can also be started from the
+Actions tab. When the numbers changed, it runs the tests and opens or updates a pull request from
+`data/inflation-refresh`. For it to open PRs, enable **Settings → Actions → General → Workflow permissions →
+Allow GitHub Actions to create and approve pull requests**.
 
 One-time setup: in the repository go to **Settings → Pages → Build and deployment** and set **Source** to
 **GitHub Actions**. The site will be at `https://<owner>.github.io/<repo>/`. The build uses relative asset paths,

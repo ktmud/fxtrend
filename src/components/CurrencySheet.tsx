@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CURRENCIES } from '../lib/currencies'
+import { CURRENCIES, POPULAR_COUNT, type CurrencyMeta } from '../lib/currencies'
+import { hasInflation } from '../lib/inflation'
 
 interface Props {
   open: boolean
@@ -36,6 +37,12 @@ export function CurrencySheet({ open, title, mode, selected, disabled = [], max,
   }, [q])
 
   const full = max != null && selected.length >= max
+  const groups: { label: string; items: readonly CurrencyMeta[] }[] = q.trim()
+    ? [{ label: '', items: list }]
+    : [
+        { label: 'Popular', items: CURRENCIES.slice(0, POPULAR_COUNT) },
+        { label: `All currencies (${CURRENCIES.length})`, items: [...CURRENCIES.slice(POPULAR_COUNT)].sort((a, b) => a.code.localeCompare(b.code)) },
+      ]
 
   return (
     <dialog
@@ -67,39 +74,48 @@ export function CurrencySheet({ open, title, mode, selected, disabled = [], max,
             {selected.length} of {max} selected{full ? ' — remove one to add another' : ''}
           </p>
         )}
-        <ul className="sheet-list" role="listbox" aria-multiselectable={mode === 'multi'}>
-          {list.map((c) => {
-            const isSel = selected.includes(c.code)
-            const isDis = disabled.includes(c.code) || (!isSel && full && mode === 'multi')
-            return (
-              <li key={c.code} role="option" aria-selected={isSel} aria-disabled={isDis}>
-                <button
-                  type="button"
-                  disabled={isDis}
-                  className={isSel ? 'is-selected' : undefined}
-                  onClick={() => {
-                    onToggle(c.code)
-                    if (mode === 'single') onClose()
-                  }}
-                >
-                  <span className="flag" aria-hidden="true">
-                    {c.flag}
-                  </span>
-                  <span className="sheet-item-text">
-                    <span className="code">{c.code}</span>
-                    <span className="name">
-                      {c.name} · {c.region}
+        <div className="sheet-list" role="listbox" aria-multiselectable={mode === 'multi'} aria-label={title}>
+          {groups.map((g) => (
+            <section key={g.label} aria-label={g.label}>
+              {g.label && <h3 className="sheet-group">{g.label}</h3>}
+              {g.items.map((c) => {
+                const isSel = selected.includes(c.code)
+                const isDis = disabled.includes(c.code) || (!isSel && full && mode === 'multi')
+                return (
+                  <button
+                    key={c.code}
+                    type="button"
+                    role="option"
+                    aria-selected={isSel}
+                    disabled={isDis}
+                    className={isSel ? 'is-selected' : undefined}
+                    onClick={() => {
+                      onToggle(c.code)
+                      if (mode === 'single') onClose()
+                    }}
+                  >
+                    <span className="flag" aria-hidden="true">
+                      {c.flag}
                     </span>
-                  </span>
-                  <span className="check" aria-hidden="true">
-                    {isSel ? '✓' : ''}
-                  </span>
-                </button>
-              </li>
-            )
-          })}
-          {list.length === 0 && <li className="empty">No currency matches “{q}”</li>}
-        </ul>
+                    <span className="sheet-item-text">
+                      <span className="code">
+                        {c.code}
+                        {!hasInflation(c.code) && <span className="tag">no CPI</span>}
+                      </span>
+                      <span className="name">
+                        {c.name} · {c.region}
+                      </span>
+                    </span>
+                    <span className="check" aria-hidden="true">
+                      {isSel ? '✓' : ''}
+                    </span>
+                  </button>
+                )
+              })}
+            </section>
+          ))}
+          {list.length === 0 && <p className="empty">No currency matches “{q}”</p>}
+        </div>
       </div>
     </dialog>
   )

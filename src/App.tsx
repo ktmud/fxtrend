@@ -7,7 +7,7 @@ import { Leaderboard } from './components/Leaderboard'
 import { Sparkline } from './components/Sparkline'
 import { CURRENCY } from './lib/currencies'
 import { currencySymbol, formatDate, formatMoney, formatMonth, formatPct, formatRate, formatTick } from './lib/format'
-import { annualisedInflation, cumulativeInflation, INFLATION } from './lib/inflation'
+import { annualisedInflation, cumulativeInflation, hasInflation, INFLATION } from './lib/inflation'
 import { MAX_SERIES, seriesVar } from './lib/palette'
 import { change, derivePairs, firstLast, indexed, sampleIndices, type PairSeries } from './lib/series'
 import { nextSlot, RANGES, rangeStart, useAppState, type Pick } from './lib/state'
@@ -24,7 +24,11 @@ export default function App() {
   const [hot, setHot] = useState<string | null>(null)
   /** Sampled index under the chart crosshair: drives the time-travel views. */
   const [scrub, setScrub] = useState<number | null>(null)
-  const { base, picks, range, adjusted } = state
+  const { base, picks, range } = state
+  // Inflation adjustment needs CPI data for the base; per-pair it also needs the quote's.
+  const baseCpi = hasInflation(base)
+  const adjusted = state.adjusted && baseCpi
+  const realOk = (code: string) => adjusted && hasInflation(code)
 
   const start = useMemo(() => rangeStart(range), [range])
   const codes = useMemo(() => picks.map((p) => p.code), [picks])
@@ -45,7 +49,7 @@ export default function App() {
     return { pairs, idx, times, pick, t0, t1, base: table.base }
   }, [table, codes])
 
-  const measure = (p: PairSeries) => (adjusted ? p.real : p.nominal)
+  const measure = (p: PairSeries) => (realOk(p.code) ? p.real : p.nominal)
 
   // ---------- actions ----------
   const setBase = (code: string) =>
@@ -90,9 +94,10 @@ export default function App() {
     const focusPair = focus ? view.pairs.find((p) => p.code === focus) : undefined
     if (focusPair) {
       const q = focusPair.code
+      const realOn = realOk(q)
       const qMeta = CURRENCY[q]
       const color = seriesVar(slotOf(q))
-      const series: ChartSeries[] = adjusted
+      const series: ChartSeries[] = realOn
         ? [
             { id: 'real', label: 'Inflation-adjusted', color, values: view.pick(focusPair.real), area: true },
             { id: 'nominal', label: 'Nominal', color: 'var(--text-muted)', values: view.pick(focusPair.nominal), dashed: true },
@@ -104,8 +109,8 @@ export default function App() {
         ends: false,
         fmt: formatRate,
         tick: formatTick,
-        aria: `${view.base} to ${q} exchange rate since ${rangeLabel}${adjusted ? ', inflation-adjusted' : ''}. Use arrow keys to travel through time.`,
-        gap: adjusted ? { a: 'real', b: 'nominal', label: 'Inflation gap' } : undefined,
+        aria: `${view.base} to ${q} exchange rate since ${rangeLabel}${realOn ? ', inflation-adjusted' : ''}. Use arrow keys to travel through time.`,
+        gap: realOn ? { a: 'real', b: 'nominal', label: 'Inflation gap' } : undefined,
         tooltip: true,
       }
 
@@ -134,7 +139,7 @@ export default function App() {
               <span className="stub-amount">{formatMoney(thenV == null ? null : thenV * amount, q)}</span>
               <span className="stub-note">
                 for {formatMoney(amount, view.base)}
-                {adjusted ? ' · in today’s money' : ''}
+                {realOn ? ' · in today’s money' : ''}
               </span>
             </div>
             <div className="stub-arrow" aria-hidden="true">
@@ -149,7 +154,7 @@ export default function App() {
             </div>
           </div>
           <p className="verdict">
-            {chg == null ? null : adjusted ? (
+            {chg == null ? null : realOn ? (
               <>
                 Your money goes <Delta value={Math.abs(chg)} plain /> {further ? 'further' : 'less far'} in {qMeta?.region} than in {thenLabel}.
               </>
@@ -160,16 +165,21 @@ export default function App() {
               </>
             )}
           </p>
+          {adjusted && !realOn && (
+            <p className="scrub-hint">No inflation data for {qMeta?.region}, so this view shows nominal rates.</p>
+          )}
           {!scrubbing && <p className="scrub-hint">↔ Drag across the chart to travel back in time</p>}
         </div>
       )
     } else {
       const series: ChartSeries[] = view.pairs.map((p) => ({
         id: p.code,
-        label: p.code,
         color: seriesVar(slotOf(p.code)),
         values: indexed(view.pick(measure(p))),
         dim: hot != null && hot !== p.code,
+        // No CPI for this currency: show its nominal line, visibly different.
+        dashed: adjusted && !hasInflation(p.code),
+        label: adjusted && !hasInflation(p.code) ? `${p.code} (nominal)` : p.code,
       }))
       chart = {
         series,
@@ -193,10 +203,12 @@ export default function App() {
         // latest known value at or before the scrubbed date
         let i = at
         while (i > 0 && sr.values[i] == null) i--
-        return { code: sr.id, color: sr.color, value: sr.values[i] ?? null }
+        return { code: sr.id, color: sr.color, value: sr.values[i] ?? null, nominal: adjusted && !hasInflation(sr.id) }
       })
       // The headline tells today's story; the leaderboard below follows the scrub.
-      const latest = series.map((sr) => ({ code: sr.id, value: firstLast(sr.values).last }))
+      const latest = series
+        .filter((sr) => !adjusted || hasInflation(sr.id)) // never rank a nominal move as "buying power"
+        .map((sr) => ({ code: sr.id, value: firstLast(sr.values).last }))
       const best = [...latest].sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity))[0]
       hero = (
         <div className="hero ticket">
@@ -274,9 +286,10 @@ export default function App() {
         </button>
         <Switch
           checked={adjusted}
+          disabled={!baseCpi}
           onChange={(v) => setState((s) => ({ ...s, adjusted: v }))}
           label="Adjust for inflation"
-          hint={adjusted ? 'Per-country CPI' : 'Nominal rates'}
+          hint={!baseCpi ? `No CPI data for ${base}` : adjusted ? 'Per-country CPI' : 'Nominal rates'}
         />
         <Segmented label="Time range" value={range} options={RANGES} onChange={(r) => setState((s) => ({ ...s, range: r }))} />
       </section>
@@ -369,7 +382,7 @@ export default function App() {
                 key={p.code}
                 pick={p}
                 pair={view?.pairs.find((x) => x.code === p.code)}
-                adjusted={adjusted}
+                adjusted={realOk(p.code)}
                 active={focus === p.code}
                 t0={view?.t0}
                 t1={view?.t1}
@@ -503,7 +516,13 @@ function CurrencyCard({
           <Delta value={chg} />
         </span>
         <span className="ccy-foot">
-          {infl != null && <span>{meta?.region} CPI {formatPct(infl, 1, false)}/yr</span>}
+          {infl != null ? (
+            <span>
+              {meta?.cpiNote ?? `${meta?.region} CPI`} {formatPct(infl, 1, false)}/yr
+            </span>
+          ) : (
+            <span>No inflation data</span>
+          )}
           {adjusted && nominalChg != null && <span>Nominal {formatPct(nominalChg, 1)}</span>}
         </span>
       </button>

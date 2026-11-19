@@ -1292,12 +1292,15 @@ tbody th {
   margin: 0;
   padding: 0;
 }
+.leaderboard li.is-nominal .lb-bar {
+  opacity: 0.45;
+}
 .leaderboard li {
   position: absolute;
   inset: 0 0 auto 0;
   height: 40px;
   display: grid;
-  grid-template-columns: 74px 1fr 70px;
+  grid-template-columns: 116px 1fr 64px;
   align-items: center;
   gap: 10px;
   transition: transform 0.45s cubic-bezier(0.3, 1.1, 0.4, 1);
@@ -1349,4 +1352,42 @@ tbody th {
 }
 .ccy-main > :not(.ccy-watermark):not(.ccy-stripe) {
   position: relative;
+}
+
+/* ---------- picker groups & tags (160+ currencies) ---------- */
+.sheet-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 10px 12px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--surface);
+}
+.sheet-list .empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 24px;
+}
+.tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  vertical-align: 1px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.switch.is-disabled {
+  cursor: not-allowed;
+}
+.switch.is-disabled .switch-track {
+  opacity: 0.4;
 }
