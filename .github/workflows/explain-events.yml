@@ -1,0 +1,103 @@
+name: Explain chart notes
+
+# Writes "why" summaries for the anomalies the app flags on its charts, using Claude Haiku 5.5
+# and each currency's Wikipedia article (scripts/explain-events.ts). Results arrive as a PR for
+# review. Only events without an explanation are sent, so later runs cost fractions of a cent.
+on:
+  schedule:
+    - cron: '17 15 9 * *' # monthly, on the 9th
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Limit to these currencies (comma-separated, e.g. IRR,ARS). Empty = all.'
+        required: false
+        default: ''
+      dry_run:
+        description: 'List what would be sent without calling the Anthropic API'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: explain-events
+  cancel-in-progress: false
+
+jobs:
+  explain:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: data/event-explanations
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Wikimedia asks automated clients to identify themselves.
+      WIKI_USER_AGENT: fxtrend-event-notes/1.0 (${{ github.server_url }}/${{ github.repository }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check for API key
+        id: key
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] && [ "$DRY_RUN" != "true" ]; then
+            echo "::warning::Add an ANTHROPIC_API_KEY repository secret to generate explanations."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # See the newest data (and any new events) before explaining; keep the snapshot if it fails.
+      - name: Refresh exchange rates
+        if: steps.key.outputs.ok == 'true'
+        run: npm run data:fx
+        continue-on-error: true
+
+      - name: Write explanations
+        if: steps.key.outputs.ok == 'true'
+        env:
+          ONLY: ${{ inputs.only }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          ARGS="--summary=$RUNNER_TEMP/summary.md"
+          if [ -n "$ONLY" ]; then
+            # currency codes only: never let a dispatch input reach the shell unchecked
+            [[ "$ONLY" =~ ^[A-Za-z]{3}(,[A-Za-z]{3})*$ ]] || { echo "::error::'only' must look like IRR,ARS"; exit 1; }
+            ARGS="$ARGS --only=$ONLY"
+          fi
+          if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          npm run explain -- $ARGS
+          if [ -f "$RUNNER_TEMP/summary.md" ]; then cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Open or update pull request
+        if: steps.key.outputs.ok == 'true' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$(git status --porcelain -- public/data/events)" ]; then
+            echo "No new explanations."
+            exit 0
+          fi
+          npm test
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C "$BRANCH"
+          git add public/data/events
+          git commit -m "Add chart-note explanations ($(date -u +%Y-%m-%d))"
+          git push --force origin "$BRANCH"
+          BODY="$RUNNER_TEMP/summary.md"
+          [ -f "$BODY" ] || echo "Updated explanations (all marked not found)." > "$BODY"
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" \
+              --title "Add explanations for chart notes" --body-file "$BODY"
+          else
+            gh pr edit "$BRANCH" --body-file "$BODY"
+          fi

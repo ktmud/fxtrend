@@ -74,6 +74,15 @@ Actions tab. When the numbers changed, it runs the tests and opens or updates a 
 `data/inflation-refresh`. For it to open PRs, enable **Settings → Actions → General → Workflow permissions →
 Allow GitHub Actions to create and approve pull requests**.
 
+`.github/workflows/explain-events.yml` (monthly, or on demand from the Actions tab) writes the "Why" summaries shown in
+chart notes. For each flagged event without one, `scripts/explain-events.ts` fetches the currency's Wikipedia article. It
+then asks Claude Haiku 5.5 to explain the event using only that text and to quote the supporting sentence. A summary is
+kept only if the quote is really in the article. Results go to `public/data/events/` through a PR for review. Events
+already handled are never sent again, so the first full run costs a few cents and later runs less. It needs an
+**`ANTHROPIC_API_KEY` repository secret** (Settings → Secrets and variables → Actions), plus the same "create pull
+requests" permission as the inflation job. Without the key the job skips with a warning. Try it locally with
+`npm run explain -- --dry-run`.
+
 One-time setup: in the repository go to **Settings → Pages → Build and deployment** and set **Source** to
 **GitHub Actions**. The site will be at `https://<owner>.github.io/<repo>/`. The build uses relative asset paths,
 so it also works from any other static host.

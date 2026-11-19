@@ -137,3 +137,11 @@ export function detectAnomalies(code: string, times: number[], values: number[],
 export function inRange(events: Anomaly[], t0: number, t1: number): Anomaly[] {
   return events.filter((e) => e.end >= t0 && e.start <= t1)
 }
+
+/**
+ * Stable id for an event, shared by the app and scripts/explain-events.ts. It uses the start
+ * date, which doesn't move as new data arrives (a frozen stretch's end date does).
+ */
+export function anomalyKey(a: Pick<Anomaly, 'kind' | 'start'>): string {
+  return `${a.kind}@${new Date(a.start).toISOString().slice(0, 10)}`
+}

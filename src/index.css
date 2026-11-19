@@ -1503,3 +1503,36 @@ tbody th {
   font-size: 13px;
   color: var(--text-secondary);
 }
+
+/* "why" summaries (scripts/explain-events.ts) */
+.note-why {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.note-why-label {
+  font-weight: 700;
+}
+.note-why details {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.note-why summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.note-why cite {
+  font-style: normal;
+  font-weight: 600;
+}
+.note-why blockquote {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-strong);
+  font-style: italic;
+}

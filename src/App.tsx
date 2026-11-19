@@ -7,6 +7,7 @@ import { Leaderboard } from './components/Leaderboard'
 import { Notes } from './components/Notes'
 import type { Anomaly } from './lib/anomalies'
 import { describe } from './lib/describe'
+import { useExplanations } from './lib/explanations'
 import { Sparkline } from './components/Sparkline'
 import { CURRENCY } from './lib/currencies'
 import { currencySymbol, formatDate, formatMoney, formatMonth, formatPct, formatRate, formatTick } from './lib/format'
@@ -68,6 +69,7 @@ export default function App() {
       .sort((a, b) => a.start - b.start)
       .map((a, i) => ({ ...a, n: i + 1, text: describe(a) }))
   }, [anomalies, view, focus, codes])
+  const explanations = useExplanations(notes)
   // Currencies whose figures in this range can't be compared at face value.
   const caveated = useMemo(() => new Set(notes.filter((n) => n.severity === 'caveat').map((n) => n.code)), [notes])
   const unreliable = (code: string) => caveated.has(code) || (view != null && caveated.has(view.base))
@@ -402,7 +404,7 @@ export default function App() {
                 marks={marks}
                 onHoverIndex={setScrub}
               />
-              {notes.length > 0 && <Notes notes={notes} color={markColor} />}
+              {notes.length > 0 && <Notes notes={notes} color={markColor} explanations={explanations} />}
               {below}
               {error && (
                 <p className="inline-error">
