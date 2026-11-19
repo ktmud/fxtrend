@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
+import type { Anomaly } from './anomalies'
 import { loadRates, resetRates, type DataStatus, type RateTable } from './fx'
 
 interface Result {
   table: RateTable | null
   status: DataStatus | null
+  /** Anomalies of the base and selected currencies that overlap the loaded range. */
+  anomalies: Anomaly[]
   loading: boolean
   error: string | null
   retry: () => void
@@ -13,6 +16,7 @@ interface Result {
 export function useRates(base: string, codes: string[], start: string): Result {
   const [table, setTable] = useState<RateTable | null>(null)
   const [status, setStatus] = useState<DataStatus | null>(null)
+  const [anomalies, setAnomalies] = useState<Anomaly[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -27,6 +31,7 @@ export function useRates(base: string, codes: string[], start: string): Result {
         if (!live) return
         setTable(r.table)
         setStatus(r.status)
+        setAnomalies(r.anomalies)
         setLoading(false)
       })
       .catch((e: unknown) => {
@@ -42,6 +47,7 @@ export function useRates(base: string, codes: string[], start: string): Result {
   return {
     table,
     status,
+    anomalies,
     loading,
     error,
     retry: () => {

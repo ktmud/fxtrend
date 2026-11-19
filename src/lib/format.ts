@@ -45,6 +45,9 @@ export const formatMonthShort = (t: number) => monthOnly.format(t)
 /** "$100", "¥15,930", "€92.10" – whole units once amounts get large. */
 export function formatMoney(v: number | null | undefined, currency: string): string {
   if (v == null || !Number.isFinite(v)) return '—'
+  // Millions don't fit a phone-width ticket: "IRR 66.6M".
+  if (Math.abs(v) >= 1e6)
+    return nf({ style: 'currency', currency, currencyDisplay: 'narrowSymbol', notation: 'compact', maximumSignificantDigits: 2 }).format(v)
   const digits = Math.abs(v) >= 1000 ? 0 : 2
   return nf({ style: 'currency', currency, currencyDisplay: 'narrowSymbol', minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v)
 }

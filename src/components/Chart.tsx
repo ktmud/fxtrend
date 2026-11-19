@@ -30,6 +30,17 @@ interface Props {
   onHoverIndex?: (i: number | null) => void
   /** false = only a date pill on the crosshair (a linked view shows the values). */
   tooltip?: boolean
+  /** Numbered notes on the time axis: a band for a stretch, a dashed line for a point in time. */
+  marks?: ChartMark[]
+}
+
+export interface ChartMark {
+  n: number
+  start: number
+  end: number
+  span: boolean
+  color: string
+  title: string
 }
 
 const HEIGHT_MOBILE = 260
@@ -87,7 +98,7 @@ function areaPath(xs: number[], ys: (number | null)[], floor: number): string {
   return d
 }
 
-export function Chart({ times, series, formatValue, formatTick, zeroLine, endLabels, ariaLabel, busy, gap, onHoverIndex, tooltip = true }: Props) {
+export function Chart({ times, series, formatValue, formatTick, zeroLine, endLabels, ariaLabel, busy, gap, onHoverIndex, tooltip = true, marks = [] }: Props) {
   const [wrapRef, width] = useWidth<HTMLDivElement>()
   const gradId = useId().replace(/:/g, '')
   const [rawHover, setHover] = useState<number | null>(null)
@@ -96,6 +107,7 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
   useEffect(() => onHoverIndex?.(hover), [hover, onHoverIndex])
   const pointerType = useRef<string>('mouse')
 
+  const padTop = marks.length ? 36 : PAD_TOP
   const narrow = width < 560
   const height = narrow ? HEIGHT_MOBILE : HEIGHT_DESKTOP
 
@@ -117,15 +129,15 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
     const padLeft = Math.max(28, Math.max(...labels.map((l) => l.length), 1) * 7 + 10)
     const padRight = endLabels ? (narrow ? 64 : 92) : 12
     const plotW = Math.max(10, width - padLeft - padRight)
-    const plotH = height - PAD_TOP - PAD_BOTTOM
+    const plotH = height - padTop - PAD_BOTTOM
     const t0 = times[0] ?? 0
     const t1 = times[times.length - 1] ?? 1
     const x = (t: number) => padLeft + (t1 === t0 ? plotW / 2 : ((t - t0) / (t1 - t0)) * plotW)
-    const y = (v: number) => PAD_TOP + (1 - (v - yt.min) / (yt.max - yt.min || 1)) * plotH
+    const y = (v: number) => padTop + (1 - (v - yt.min) / (yt.max - yt.min || 1)) * plotH
     const xs = times.map(x)
     const xt = timeTicks(t0, t1, Math.max(2, Math.floor(plotW / (narrow ? 54 : 72))), (t) => String(new Date(t).getUTCFullYear()), formatMonthShort)
     return { yt, labels, padLeft, padRight, plotW, plotH, x, y, xs, xt }
-  }, [series, times, width, height, narrow, zeroLine, endLabels, formatTick])
+  }, [series, times, width, height, narrow, zeroLine, endLabels, formatTick, padTop])
 
   const ys = useMemo(() => series.map((s) => s.values.map((v) => (v == null ? null : geo.y(v)))), [series, geo])
 
@@ -183,6 +195,28 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
   }
 
   const floor = height - PAD_BOTTOM
+
+  // Note badges: clamp to the plot, then push apart so numbers never overlap.
+  const badges = useMemo(() => {
+    if (!marks.length || !times.length) return []
+    const t0 = times[0]
+    const t1 = times[times.length - 1]
+    const left = geo.x(t0)
+    const right = geo.x(t1)
+    const items = marks
+      .map((m) => {
+        const a = geo.x(Math.max(m.start, t0))
+        const b = geo.x(Math.min(m.end, t1))
+        return { ...m, a, b, cx: m.span ? (a + b) / 2 : b }
+      })
+      .sort((p, q) => p.cx - q.cx)
+    const R = 9
+    for (let k = 1; k < items.length; k++) items[k].cx = Math.max(items[k].cx, items[k - 1].cx + 2 * R + 2)
+    const over = items.length ? items[items.length - 1].cx - (right - R) : 0
+    if (over > 0) for (const it of items) it.cx -= over
+    for (const it of items) it.cx = Math.max(it.cx, left + R)
+    return items
+  }, [marks, times, geo])
 
   const gapPath = useMemo(() => {
     if (!gap) return ''
@@ -266,6 +300,15 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
           </g>
 
           {/* data */}
+          <g className="notes-layer" aria-hidden="true">
+            {badges.map((m) =>
+              m.span ? (
+                <rect key={`band-${m.n}`} x={m.a} width={Math.max(2, m.b - m.a)} y={padTop} height={floor - padTop} className="note-band" />
+              ) : (
+                <line key={`line-${m.n}`} x1={m.b} x2={m.b} y1={padTop} y2={floor} className="note-line" />
+              ),
+            )}
+          </g>
           <g className="marks">
             {gapPath && <path d={gapPath} fill={`url(#${gradId}-hatch)`} className="gap-ribbon" />}
             {series.map(
@@ -293,10 +336,23 @@ export function Chart({ times, series, formatValue, formatTick, zeroLine, endLab
             </g>
           ))}
 
+          {badges.map((m) => (
+            <a key={`badge-${m.n}`} href={`#note-${m.n}`} className="note-badge" aria-label={`Note ${m.n}: ${m.title}`}>
+              <title>{`${m.n}. ${m.title}`}</title>
+              {Math.abs(m.cx - (m.span ? (m.a + m.b) / 2 : m.b)) > 1 && (
+                <line x1={m.cx} x2={m.span ? (m.a + m.b) / 2 : m.b} y1={22} y2={padTop} className="note-leader" />
+              )}
+              <circle cx={m.cx} cy={13} r={9} fill={m.color} />
+              <text x={m.cx} y={13} dy="0.35em" textAnchor="middle">
+                {m.n}
+              </text>
+            </a>
+          ))}
+
           {/* hover layer */}
           {hx != null && (
             <g className="crosshair">
-              <line x1={hx} x2={hx} y1={PAD_TOP} y2={floor} />
+              <line x1={hx} x2={hx} y1={padTop} y2={floor} />
               {series.map((s, k) => {
                 const y = hover != null ? ys[k][hover] : null
                 return y == null ? null : <circle key={s.id} cx={hx} cy={y} r={4.5} fill={s.color} className="dot" />

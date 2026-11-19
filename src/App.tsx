@@ -1,9 +1,12 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Chart, type ChartSeries } from './components/Chart'
+import { Chart, type ChartMark, type ChartSeries } from './components/Chart'
 import { Segmented, Switch } from './components/Controls'
 import { CurrencySheet } from './components/CurrencySheet'
 import { Guilloche, GuillocheBand } from './components/Guilloche'
 import { Leaderboard } from './components/Leaderboard'
+import { Notes } from './components/Notes'
+import type { Anomaly } from './lib/anomalies'
+import { describe } from './lib/describe'
 import { Sparkline } from './components/Sparkline'
 import { CURRENCY } from './lib/currencies'
 import { currencySymbol, formatDate, formatMoney, formatMonth, formatPct, formatRate, formatTick } from './lib/format'
@@ -16,6 +19,7 @@ import { useRates } from './lib/useRates'
 
 const CHART_POINTS = 520
 const SPARK_POINTS = 120
+const MAX_NOTES = 10
 
 export default function App() {
   const [state, setState] = useAppState()
@@ -32,7 +36,7 @@ export default function App() {
 
   const start = useMemo(() => rangeStart(range), [range])
   const codes = useMemo(() => picks.map((p) => p.code), [picks])
-  const { table, status, loading, error, retry } = useRates(base, codes, start)
+  const { table, status, anomalies, loading, error, retry } = useRates(base, codes, start)
 
   const focus = picks.length === 1 ? picks[0].code : state.focus
   const slotOf = useCallback((code: string) => picks.find((p) => p.code === code)?.slot ?? 0, [picks])
@@ -50,6 +54,32 @@ export default function App() {
   }, [table, codes])
 
   const measure = (p: PairSeries) => (realOk(p.code) ? p.real : p.nominal)
+
+  // ---------- notes: anomalies detected in the data (no AI) ----------
+  const notes = useMemo(() => {
+    if (!view) return []
+    const shown = new Set([view.base, ...(focus ? [focus] : codes)])
+    const relevant = anomalies.filter((a) => shown.has(a.code) && a.end >= view.t0 && a.start <= view.t1)
+    // Keep the 10 most important (caveats first, then the biggest moves), numbered in time order.
+    const weight = (a: Anomaly) => (a.severity === 'caveat' ? 1e6 : 0) + Math.abs(Math.log(a.ratio ?? 1))
+    return [...relevant]
+      .sort((a, b) => weight(b) - weight(a))
+      .slice(0, MAX_NOTES)
+      .sort((a, b) => a.start - b.start)
+      .map((a, i) => ({ ...a, n: i + 1, text: describe(a) }))
+  }, [anomalies, view, focus, codes])
+  // Currencies whose figures in this range can't be compared at face value.
+  const caveated = useMemo(() => new Set(notes.filter((n) => n.severity === 'caveat').map((n) => n.code)), [notes])
+  const unreliable = (code: string) => caveated.has(code) || (view != null && caveated.has(view.base))
+  const markColor = (code: string) => (code === view?.base ? 'var(--ink)' : seriesVar(slotOf(code)))
+  const marks: ChartMark[] = notes.map((n) => ({
+    n: n.n,
+    start: n.start,
+    end: n.end,
+    span: n.kind !== 'jump',
+    color: markColor(n.code),
+    title: `${n.code}: ${n.text.title}`,
+  }))
 
   // ---------- actions ----------
   const setBase = (code: string) =>
@@ -165,6 +195,20 @@ export default function App() {
               </>
             )}
           </p>
+          {unreliable(q) && (
+            <p className="caveat-line">
+              ⚠ The data for this range has a caveat, so read these figures with care. See{' '}
+              {notes
+                .filter((n) => n.severity === 'caveat')
+                .map((n, k) => (
+                  <span key={n.n}>
+                    {k > 0 && ', '}
+                    <a href={`#note-${n.n}`}>note {n.n}</a>
+                  </span>
+                ))}{' '}
+              below.
+            </p>
+          )}
           {adjusted && !realOn && (
             <p className="scrub-hint">No inflation data for {qMeta?.region}, so this view shows nominal rates.</p>
           )}
@@ -203,11 +247,13 @@ export default function App() {
         // latest known value at or before the scrubbed date
         let i = at
         while (i > 0 && sr.values[i] == null) i--
-        return { code: sr.id, color: sr.color, value: sr.values[i] ?? null, nominal: adjusted && !hasInflation(sr.id) }
+        const tag = unreliable(sr.id) ? 'data caveat' : adjusted && !hasInflation(sr.id) ? 'nominal' : undefined
+        return { code: sr.id, color: sr.color, value: sr.values[i] ?? null, tag }
       })
       // The headline tells today's story; the leaderboard below follows the scrub.
       const latest = series
-        .filter((sr) => !adjusted || hasInflation(sr.id)) // never rank a nominal move as "buying power"
+        // never headline a nominal move as "buying power", or a figure distorted by bad data
+        .filter((sr) => (!adjusted || hasInflation(sr.id)) && !unreliable(sr.id))
         .map((sr) => ({ code: sr.id, value: firstLast(sr.values).last }))
       const best = [...latest].sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity))[0]
       hero = (
@@ -353,8 +399,10 @@ export default function App() {
                 busy={loading}
                 gap={chart.gap}
                 tooltip={chart.tooltip}
+                marks={marks}
                 onHoverIndex={setScrub}
               />
+              {notes.length > 0 && <Notes notes={notes} color={markColor} />}
               {below}
               {error && (
                 <p className="inline-error">

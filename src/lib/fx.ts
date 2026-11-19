@@ -9,6 +9,9 @@
  * 3. Any pair is a cross rate: quote/USD ÷ base/USD. Sources publish on different calendars
  *    (some skip weekends, some don't), so each leg carries its last value forward for a few days.
  */
+import { detectAnomalies, type Anomaly } from './anomalies'
+import { cumulativeInflation } from './inflation'
+
 const API = 'https://api.frankfurter.dev/v2'
 const DATA = `${import.meta.env.BASE_URL}data/fx/`
 const DAY = 86_400_000
@@ -115,6 +118,7 @@ function getSeries(code: string): Promise<Series> {
 /** Retry after a failure starts from scratch. */
 export function resetRates() {
   cache.clear()
+  anomalyCache.clear()
   index = null
 }
 
@@ -129,7 +133,22 @@ function align(s: Series, times: number[]): (number | null)[] {
   return out
 }
 
-export async function loadRates(base: string, codes: string[], start: string): Promise<{ table: RateTable; status: DataStatus }> {
+const anomalyCache = new Map<string, Anomaly[]>()
+/** Detected over the currency's whole history (not just the visible range), once per currency. */
+function anomaliesOf(code: string, s: Series): Anomaly[] {
+  let a = anomalyCache.get(code)
+  if (!a) {
+    a = detectAnomalies(code, s.times, s.values, cumulativeInflation)
+    anomalyCache.set(code, a)
+  }
+  return a
+}
+
+export async function loadRates(
+  base: string,
+  codes: string[],
+  start: string,
+): Promise<{ table: RateTable; status: DataStatus; anomalies: Anomaly[] }> {
   const quotes = [...new Set(codes)].filter((c) => c !== base)
   const needed = [...new Set([base, ...quotes])].filter((c) => c !== 'USD')
   const loaded = await Promise.all(needed.map((c) => getSeries(c).then((s) => [c, s] as const)))
@@ -154,5 +173,10 @@ export async function loadRates(base: string, codes: string[], start: string): P
 
   const asOf = times.length ? toIso(times[times.length - 1]) : start
   const live = loaded.length === 0 || loaded.every(([, s]) => s.live)
-  return { table: { base, dates: times.map(toIso), times, rates }, status: { asOf, live } }
+  const t1 = times[times.length - 1] ?? t0
+  const anomalies = loaded
+    .flatMap(([code, s]) => anomaliesOf(code, s))
+    .filter((e) => e.end >= t0 && e.start <= t1)
+    .sort((a, b) => a.start - b.start)
+  return { table: { base, dates: times.map(toIso), times, rates }, status: { asOf, live }, anomalies }
 }

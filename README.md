@@ -12,6 +12,11 @@ consumer price inflation.
     is shaded as the *inflation gap*.
   - **Compare view**: % change against every selected currency on one axis, and a leaderboard that re-ranks
     the currencies as you scrub through time.
+- **Notes on the chart**: unusual stretches are found automatically, without AI (`src/lib/anomalies.ts`), and shown as numbered
+  badges with plain-language notes. Four kinds are detected: sharp one-day moves that stick (e.g. ARS, Dec 2023); jumps of 5× or
+  more, which usually mean a redenomination or a change in which rate the source reports; erratic source data; and rates held
+  almost fixed while inflation ran ≥10 points a year above the US (official rates, e.g. IRR 2018–2026). Figures with a data
+  caveat are tagged and never used as the "where your money goes furthest" headline.
 - **Banknote look**: each currency pair gets its own generated guilloche rosette (the engraved line pattern on
   banknotes), plus serif display figures (Fraunces, self-hosted) and currency-symbol watermarks.
 - Mobile-first layout with bottom-sheet pickers; two-column layout on desktop. Light and dark themes.
